@@ -89,6 +89,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     const [passportData, setPassportData] = useState<any>(null);
     const [livenessResult, setLivenessResult] = useState<{ isLive: boolean; reason: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [isCameraReady, setIsCameraReady] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -134,6 +135,9 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     }, [step]);
 
     const navigateToStep = (newStep: KYCStep) => {
+        if (newStep === 'passport' || newStep === 'liveness') {
+            setIsCameraReady(false);
+        }
         const steps: KYCStep[] = ['start', 'passport', 'liveness', 'verifying', 'success', 'failure'];
         const currentIndex = steps.indexOf(step);
         const newIndex = steps.indexOf(newStep);
@@ -145,7 +149,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     };
 
     const handleScanPassport = async () => {
-        if (!videoRef.current || !canvasRef.current) return;
+        if (!videoRef.current || !canvasRef.current || !isCameraReady) return;
         navigateToStep('verifying');
 
         const video = videoRef.current;
@@ -170,7 +174,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     };
     
     const handleStartLivenessCheck = async () => {
-        if (!mediaStreamRef.current) return;
+        if (!mediaStreamRef.current || !isCameraReady) return;
         navigateToStep('verifying');
 
         const recordedChunks: Blob[] = [];
@@ -251,10 +255,12 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                         <h2 className="text-2xl font-bold mb-2">Scan Your Passport</h2>
                         <p className="text-slate-400 mb-4">Position the photo page of your passport inside the frame.</p>
                         <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 border-2 border-slate-700 mb-6">
-                            <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover"></video>
+                            <video ref={videoRef} autoPlay playsInline muted onCanPlay={() => setIsCameraReady(true)} className="w-full h-full object-cover"></video>
                             <canvas ref={canvasRef} className="hidden"></canvas>
                         </div>
-                        <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleScanPassport} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg">Scan Passport</motion.button>
+                        <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleScanPassport} disabled={!isCameraReady} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
+                            {isCameraReady ? 'Scan Passport' : 'Initializing Camera...'}
+                        </motion.button>
                     </motion.div>
                 );
             case 'liveness':
@@ -263,9 +269,11 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                          <h2 className="text-2xl font-bold mb-2">Liveness Check</h2>
                          <p className="text-slate-400 mb-4">Position your face in the oval and slowly turn your head to the right when you press record.</p>
                          <div className="relative w-full aspect-square rounded-full mx-auto max-w-xs overflow-hidden bg-slate-900 border-2 border-slate-700 mb-6">
-                             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]"></video>
+                             <video ref={videoRef} autoPlay playsInline muted onCanPlay={() => setIsCameraReady(true)} className="w-full h-full object-cover scale-x-[-1]"></video>
                          </div>
-                         <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleStartLivenessCheck} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg">Record 3s Video</motion.button>
+                         <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleStartLivenessCheck} disabled={!isCameraReady} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
+                             {isCameraReady ? 'Record 3s Video' : 'Initializing Camera...'}
+                         </motion.button>
                      </motion.div>
                  );
             case 'verifying':
