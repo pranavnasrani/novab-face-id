@@ -172,13 +172,30 @@ export default function App() {
         const supported = !!(navigator.credentials && navigator.credentials.create && window.PublicKeyCredential);
         setIsPasskeySupported(supported);
 
-        // FIX: Switched to Firebase v8 syntax.
         const unsubscribe = auth.onAuthStateChanged(async (firebaseUser) => {
             setIsLoading(true);
             setInsightsData(null); // Reset insights on auth change
+
             if (firebaseUser) {
-                await loadUserAndData(firebaseUser.uid);
+                // Always check Firestore for KYC status before proceeding with login
+                const userDoc = await db.collection("users").doc(firebaseUser.uid).get();
+                if (userDoc.exists && userDoc.data()?.kycVerified) {
+                    // User is verified, proceed to log them in completely.
+                    await loadUserAndData(firebaseUser.uid);
+                } else {
+                    // User is NOT verified (e.g., just registered) or the Firestore doc doesn't exist yet.
+                    // Do not log them in. Clear any partial state and ensure they are signed out.
+                    setCurrentUser(null);
+                    setTransactions([]);
+                    setPasskeys([]);
+                    // The registration/login flows are responsible for setting kycUserId to show the KYC screen.
+                    // We sign out here to prevent being stuck in an authenticated but unauthorized state.
+                    if (auth.currentUser?.uid === firebaseUser.uid) {
+                        await auth.signOut();
+                    }
+                }
             } else {
+                // User is logged out
                 setCurrentUser(null);
                 setTransactions([]);
                 setPasskeys([]);

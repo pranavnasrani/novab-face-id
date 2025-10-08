@@ -72,7 +72,7 @@ const extractFramesFromVideo = (videoBlob: Blob, frameCount: number = 5): Promis
             };
             
             video.currentTime = 0;
-            video.play().then(() => video.pause());
+            video.play().then(() => video.pause()).catch(reject);
         };
         video.onerror = (e) => {
             URL.revokeObjectURL(video.src);
@@ -83,7 +83,7 @@ const extractFramesFromVideo = (videoBlob: Blob, frameCount: number = 5): Promis
 
 
 export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComplete }) => {
-    const { updateUserKycStatus, showToast } = useContext(BankContext);
+    const { updateUserKycStatus } = useContext(BankContext);
     const [[step, direction], setStep] = useState<[KYCStep, number]>(['start', 0]);
 
     const [passportData, setPassportData] = useState<any>(null);
@@ -101,22 +101,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
             mediaStreamRef.current = null;
         }
     };
-
-    useEffect(() => {
-        return () => cleanupCamera(); // Cleanup on component unmount
-    }, []);
-
-    const navigateToStep = (newStep: KYCStep) => {
-        const steps: KYCStep[] = ['start', 'passport', 'liveness', 'verifying', 'success', 'failure'];
-        const currentIndex = steps.indexOf(step);
-        const newIndex = steps.indexOf(newStep);
-        setStep([newStep, newIndex > currentIndex ? 1 : -1]);
-    };
-
-    const handleStartVerification = () => {
-        navigateToStep('passport');
-    };
-
+    
     const setupCamera = async (constraints: MediaStreamConstraints) => {
         try {
             cleanupCamera(); // Ensure previous stream is stopped
@@ -132,6 +117,33 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
         }
     };
 
+    useEffect(() => {
+        // This effect handles camera setup and cleanup based on the current step.
+        // It follows the Rules of Hooks by being at the top level.
+        if (step === 'passport') {
+            setupCamera({ video: { facingMode: "environment" } });
+        } else if (step === 'liveness') {
+            setupCamera({ video: { facingMode: "user" } });
+        } else {
+            // Cleanup camera when not in a camera-related step
+            cleanupCamera();
+        }
+
+        // Final cleanup on component unmount
+        return () => cleanupCamera();
+    }, [step]);
+
+    const navigateToStep = (newStep: KYCStep) => {
+        const steps: KYCStep[] = ['start', 'passport', 'liveness', 'verifying', 'success', 'failure'];
+        const currentIndex = steps.indexOf(step);
+        const newIndex = steps.indexOf(newStep);
+        setStep([newStep, newIndex > currentIndex ? 1 : -1]);
+    };
+
+    const handleStartVerification = () => {
+        navigateToStep('passport');
+    };
+
     const handleScanPassport = async () => {
         if (!videoRef.current || !canvasRef.current) return;
         navigateToStep('verifying');
@@ -143,8 +155,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
         canvas.getContext('2d')?.drawImage(video, 0, 0);
         
         const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
-        cleanupCamera();
-
+        
         try {
             const data = await extractPassportDetails(base64Image);
             if (!data.fullName || !data.passportNumber) {
@@ -172,7 +183,6 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
 
         mediaRecorderRef.current.onstop = async () => {
             const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
-            cleanupCamera();
             try {
                 const frames = await extractFramesFromVideo(videoBlob, 5);
                 const result = await performLivenessCheck(frames);
@@ -236,7 +246,6 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                     </motion.div>
                 );
             case 'passport':
-                useEffect(() => { setupCamera({ video: { facingMode: "environment" } }); }, []);
                 return (
                     <motion.div key="passport" variants={itemVariants} className="text-center">
                         <h2 className="text-2xl font-bold mb-2">Scan Your Passport</h2>
@@ -249,7 +258,6 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                     </motion.div>
                 );
             case 'liveness':
-                 useEffect(() => { setupCamera({ video: { facingMode: "user" } }); }, []);
                  return (
                      <motion.div key="liveness" variants={itemVariants} className="text-center">
                          <h2 className="text-2xl font-bold mb-2">Liveness Check</h2>
