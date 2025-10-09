@@ -47,37 +47,41 @@ const extractFramesFromVideo = (videoBlob: Blob, frameCount: number = 5): Promis
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         const frames: string[] = [];
+        let capturedFrames = 0;
 
         video.onloadedmetadata = () => {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
             const duration = video.duration;
             const interval = duration / frameCount;
-            let currentTime = 0;
-            let capturedFrames = 0;
+
+            const captureFrame = (time: number) => {
+                video.currentTime = time;
+            };
 
             video.onseeked = () => {
-                if (!context) return reject('Canvas context not found');
+                if (!context || capturedFrames >= frameCount) return;
+
                 context.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
-                frames.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]); // Get base64
+                frames.push(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
                 capturedFrames++;
-                
+
                 if (capturedFrames < frameCount) {
-                    currentTime += interval;
-                    video.currentTime = Math.min(currentTime, duration);
+                    captureFrame(capturedFrames * interval);
                 } else {
                     URL.revokeObjectURL(video.src);
                     resolve(frames);
                 }
             };
             
-            video.currentTime = 0;
-            video.play().then(() => video.pause()).catch(reject);
+            // Start the process
+            captureFrame(0);
         };
+
         video.onerror = (e) => {
             URL.revokeObjectURL(video.src);
             reject(e);
-        }
+        };
     });
 };
 
@@ -90,6 +94,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     const [livenessResult, setLivenessResult] = useState<{ isLive: boolean; reason: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
+    const [isRecording, setIsRecording] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -137,6 +142,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     const navigateToStep = (newStep: KYCStep) => {
         if (newStep === 'passport' || newStep === 'liveness') {
             setIsCameraReady(false);
+            setIsRecording(false);
         }
         const steps: KYCStep[] = ['start', 'passport', 'liveness', 'verifying', 'success', 'failure'];
         const currentIndex = steps.indexOf(step);
@@ -174,8 +180,8 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     };
     
     const handleStartLivenessCheck = async () => {
-        if (!mediaStreamRef.current || !isCameraReady) return;
-        navigateToStep('verifying');
+        if (!mediaStreamRef.current || !isCameraReady || isRecording) return;
+        setIsRecording(true);
 
         const recordedChunks: Blob[] = [];
         mediaRecorderRef.current = new MediaRecorder(mediaStreamRef.current);
@@ -186,6 +192,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
         };
 
         mediaRecorderRef.current.onstop = async () => {
+            navigateToStep('verifying');
             const videoBlob = new Blob(recordedChunks, { type: 'video/webm' });
             try {
                 const frames = await extractFramesFromVideo(videoBlob, 5);
@@ -269,10 +276,16 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                          <h2 className="text-2xl font-bold mb-2">Liveness Check</h2>
                          <p className="text-slate-400 mb-4">Position your face in the oval and slowly turn your head to the right when you press record.</p>
                          <div className="relative w-full aspect-square rounded-full mx-auto max-w-xs overflow-hidden bg-slate-900 border-2 border-slate-700 mb-6">
+                            {isRecording && (
+                                <div className="absolute top-4 right-4 flex items-center gap-2 bg-red-600/80 text-white text-xs font-bold px-2 py-1 rounded-full z-10">
+                                    <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                    REC
+                                </div>
+                            )}
                              <video ref={videoRef} autoPlay playsInline muted onCanPlay={() => setIsCameraReady(true)} className="w-full h-full object-cover scale-x-[-1]"></video>
                          </div>
-                         <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleStartLivenessCheck} disabled={!isCameraReady} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
-                             {isCameraReady ? 'Record 3s Video' : 'Initializing Camera...'}
+                         <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleStartLivenessCheck} disabled={!isCameraReady || isRecording} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
+                             {isRecording ? 'Recording...' : isCameraReady ? 'Record 3s Video' : 'Initializing Camera...'}
                          </motion.button>
                      </motion.div>
                  );

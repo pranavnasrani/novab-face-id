@@ -273,60 +273,86 @@ export const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose }) => {
 
   const handleSend = async (prompt: string) => {
     if (!prompt.trim() || isLoading || !currentUser || !chat) return;
-    
+
     const userMessage: Message = { id: messageId.current++, sender: 'user', text: prompt };
     setMessages(prev => [...prev, userMessage]);
     setInputValue('');
     setIsLoading(true);
 
     try {
-      const response = await chat.sendMessage({ message: prompt });
-      const functionCalls = response.functionCalls;
+        // Helper to handle streaming responses and collecting function calls
+        const streamAndHandle = async (messageContent: string | any[]) => {
+            const responseStream = await chat.sendMessageStream({ message: messageContent });
+            
+            let accumulatedText = '';
+            let aiMessageId: number | null = null;
+            const collectedFunctionCalls: any[] = [];
 
-      if (functionCalls && functionCalls.length > 0) {
-        const functionResponseParts = [];
-        
-        for (const call of functionCalls) {
-            const sensitiveActions = ['initiatePayment', 'makeAccountPayment', 'applyForCreditCard', 'applyForLoan', 'requestPaymentExtension'];
-            if (sensitiveActions.includes(call.name)) {
-                const systemMessage: Message = { id: messageId.current++, sender: 'system', text: t('passkeyConfirmationRequired', { action: call.name }) };
-                setMessages(prev => [...prev, systemMessage]);
+            for await (const chunk of responseStream) {
+                // Check for function calls in the chunk and collect them
+                if (chunk.functionCalls) {
+                    collectedFunctionCalls.push(...chunk.functionCalls);
+                }
 
-                const isVerified = await verifyCurrentUserWithPasskey();
-
-                if (!isVerified) {
-                    const cancelledMessage: Message = { id: messageId.current++, sender: 'system', text: t('actionCancelled') };
-                    setMessages(prev => [...prev, cancelledMessage]);
-                    functionResponseParts.push({
-                        functionResponse: {
-                            name: call.name,
-                            response: { success: false, message: 'User cancelled the action with their passkey.' },
-                        }
-                    });
-                    continue; 
+                // Check for text in the chunk and stream it to the UI
+                const chunkText = chunk.text;
+                if (chunkText) {
+                    if (aiMessageId === null) {
+                        // This is the first text chunk, so create a new message placeholder
+                        aiMessageId = messageId.current++;
+                        setMessages(prev => [...prev, { id: aiMessageId!, sender: 'ai', text: '' }]);
+                    }
+                    accumulatedText += chunkText;
+                    // Update the message with the accumulated text
+                    setMessages(prev => prev.map(msg => 
+                        msg.id === aiMessageId ? { ...msg, text: accumulatedText } : msg
+                    ));
                 }
             }
+            return collectedFunctionCalls;
+        };
 
-            const { message, resultForModel } = await handleFunctionCall(call);
+        // Initial call with the user's prompt
+        const functionCalls = await streamAndHandle(prompt);
 
-            const systemMessage: Message = { id: messageId.current++, sender: 'system', text: message };
-            setMessages(prev => [...prev, systemMessage]);
+        // If function calls were returned, process them
+        if (functionCalls.length > 0) {
+            const functionResponseParts = [];
+            
+            for (const call of functionCalls) {
+                const sensitiveActions = ['initiatePayment', 'makeAccountPayment', 'applyForCreditCard', 'applyForLoan', 'requestPaymentExtension'];
+                if (sensitiveActions.includes(call.name)) {
+                    const systemMessage: Message = { id: messageId.current++, sender: 'system', text: t('passkeyConfirmationRequired', { action: call.name }) };
+                    setMessages(prev => [...prev, systemMessage]);
 
-            functionResponseParts.push({
-                functionResponse: { name: call.name, response: resultForModel }
-            });
+                    const isVerified = await verifyCurrentUserWithPasskey();
+
+                    if (!isVerified) {
+                        const cancelledMessage: Message = { id: messageId.current++, sender: 'system', text: t('actionCancelled') };
+                        setMessages(prev => [...prev, cancelledMessage]);
+                        functionResponseParts.push({
+                            functionResponse: {
+                                name: call.name,
+                                response: { success: false, message: 'User cancelled the action with their passkey.' },
+                            }
+                        });
+                        continue; 
+                    }
+                }
+
+                const { message, resultForModel } = await handleFunctionCall(call);
+
+                const systemMessage: Message = { id: messageId.current++, sender: 'system', text: message };
+                setMessages(prev => [...prev, systemMessage]);
+
+                functionResponseParts.push({
+                    functionResponse: { name: call.name, response: resultForModel }
+                });
+            }
+            
+            // Send the function responses back and stream the final text answer
+            await streamAndHandle(functionResponseParts);
         }
-        
-        const finalResponse = await chat.sendMessage({ message: functionResponseParts });
-        if (finalResponse.text) {
-            const aiMessage: Message = { id: messageId.current++, sender: 'ai', text: finalResponse.text };
-            setMessages(prev => [...prev, aiMessage]);
-        }
-
-      } else {
-        const aiResponse: Message = { id: messageId.current++, sender: 'ai', text: response.text };
-        setMessages(prev => [...prev, aiResponse]);
-      }
 
     } catch (error) {
         console.error("Error during AI chat:", error);
