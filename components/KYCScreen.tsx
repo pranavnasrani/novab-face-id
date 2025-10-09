@@ -85,19 +85,27 @@ const extractFramesFromVideo = (videoBlob: Blob, frameCount: number = 5): Promis
     });
 };
 
+const fileToBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = error => reject(error);
+});
+
 
 export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComplete }) => {
     const { updateUserKycStatus } = useContext(BankContext);
     const [[step, direction], setStep] = useState<[KYCStep, number]>(['start', 0]);
 
     const [passportData, setPassportData] = useState<any>(null);
+    const [passportImage, setPassportImage] = useState<File | null>(null);
     const [livenessResult, setLivenessResult] = useState<{ isLive: boolean; reason: string } | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isCameraReady, setIsCameraReady] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
 
     const videoRef = useRef<HTMLVideoElement>(null);
-    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const passportInputRef = useRef<HTMLInputElement>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
 
@@ -115,6 +123,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
             mediaStreamRef.current = stream;
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
+                videoRef.current.oncanplay = () => setIsCameraReady(true);
             }
         } catch (err) {
             console.error("Camera error:", err);
@@ -124,14 +133,10 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     };
 
     useEffect(() => {
-        // This effect handles camera setup and cleanup based on the current step.
-        // It follows the Rules of Hooks by being at the top level.
-        if (step === 'passport') {
-            setupCamera({ video: { facingMode: "environment" } });
-        } else if (step === 'liveness') {
+        if (step === 'liveness') {
+            setIsCameraReady(false);
             setupCamera({ video: { facingMode: "user" } });
         } else {
-            // Cleanup camera when not in a camera-related step
             cleanupCamera();
         }
 
@@ -140,10 +145,16 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
     }, [step]);
 
     const navigateToStep = (newStep: KYCStep) => {
-        if (newStep === 'passport' || newStep === 'liveness') {
-            setIsCameraReady(false);
+        const isNavigatingToCameraStep = newStep === 'passport' || newStep === 'liveness';
+        if (!isNavigatingToCameraStep) {
             setIsRecording(false);
         }
+
+        if (newStep === 'start') {
+            setPassportImage(null);
+            setError(null);
+        }
+        
         const steps: KYCStep[] = ['start', 'passport', 'liveness', 'verifying', 'success', 'failure'];
         const currentIndex = steps.indexOf(step);
         const newIndex = steps.indexOf(newStep);
@@ -154,22 +165,22 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
         navigateToStep('passport');
     };
 
+    const handlePassportFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setPassportImage(file);
+        }
+    };
+
     const handleScanPassport = async () => {
-        if (!videoRef.current || !canvasRef.current || !isCameraReady) return;
+        if (!passportImage) return;
         navigateToStep('verifying');
 
-        const video = videoRef.current;
-        const canvas = canvasRef.current;
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d')?.drawImage(video, 0, 0);
-        
-        const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
-        
         try {
+            const base64Image = await fileToBase64(passportImage);
             const data = await extractPassportDetails(base64Image);
             if (!data.fullName || !data.passportNumber) {
-                throw new Error("Could not read passport details clearly.");
+                throw new Error("Could not read passport details clearly. Please try again with a clearer photo.");
             }
             setPassportData(data);
             navigateToStep('liveness');
@@ -259,14 +270,28 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
             case 'passport':
                 return (
                     <motion.div key="passport" variants={itemVariants} className="text-center">
-                        <h2 className="text-2xl font-bold mb-2">Scan Your Passport</h2>
-                        <p className="text-slate-400 mb-4">Position the photo page of your passport inside the frame.</p>
-                        <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 border-2 border-slate-700 mb-6">
-                            <video ref={videoRef} autoPlay playsInline muted onCanPlay={() => setIsCameraReady(true)} className="w-full h-full object-cover"></video>
-                            <canvas ref={canvasRef} className="hidden"></canvas>
+                         <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            ref={passportInputRef}
+                            onChange={handlePassportFileChange}
+                            className="hidden"
+                        />
+                        <h2 className="text-2xl font-bold mb-2">Upload Passport Photo</h2>
+                        <p className="text-slate-400 mb-4">Please provide a clear photo of the main page of your passport.</p>
+                        <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 border-2 border-dashed border-slate-700 mb-6 flex items-center justify-center cursor-pointer" onClick={() => passportInputRef.current?.click()}>
+                            {passportImage ? (
+                                <img src={URL.createObjectURL(passportImage)} alt="Passport Preview" className="w-full h-full object-contain" />
+                            ) : (
+                                <div className="text-center text-slate-500 p-4">
+                                    <PassportIcon className="w-16 h-16 mx-auto mb-2" />
+                                    <p>Tap to upload a photo</p>
+                                </div>
+                            )}
                         </div>
-                        <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleScanPassport} disabled={!isCameraReady} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
-                            {isCameraReady ? 'Scan Passport' : 'Initializing Camera...'}
+                        <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleScanPassport} disabled={!passportImage} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
+                            Continue
                         </motion.button>
                     </motion.div>
                 );
@@ -282,7 +307,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
                                     REC
                                 </div>
                             )}
-                             <video ref={videoRef} autoPlay playsInline muted onCanPlay={() => setIsCameraReady(true)} className="w-full h-full object-cover scale-x-[-1]"></video>
+                             <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]"></video>
                          </div>
                          <motion.button whileHover={{scale: 1.05}} whileTap={{scale: 0.95}} onClick={handleStartLivenessCheck} disabled={!isCameraReady || isRecording} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl transition-all text-lg disabled:opacity-50">
                              {isRecording ? 'Recording...' : isCameraReady ? 'Record 3s Video' : 'Initializing Camera...'}
