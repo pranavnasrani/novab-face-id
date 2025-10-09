@@ -483,7 +483,7 @@ export const ChatModal: React.FC<ChatModalProps> = ({ isOpen, onClose }) => {
 
     try {
         const base64Image = await fileToBase64(file);
-        const details = await extractPaymentDetailsFromImage(base64Image);
+        const details = await extractPaymentDetailsFromImage(base64Image, file.type);
 
         if (!details.recipientName && !details.recipientAccountNumber) {
              setMessages(prev => [...prev, { id: messageId.current++, sender: 'system', text: t('ocrFailed') }]);

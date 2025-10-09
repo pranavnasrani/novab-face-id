@@ -178,7 +178,7 @@ export const KYCScreen: React.FC<KYCScreenProps> = ({ userId, onVerificationComp
 
         try {
             const base64Image = await fileToBase64(passportImage);
-            const data = await extractPassportDetails(base64Image);
+            const data = await extractPassportDetails(base64Image, passportImage.type);
             if (!data.fullName || !data.passportNumber) {
                 throw new Error("Could not read passport details clearly. Please try again with a clearer photo.");
             }

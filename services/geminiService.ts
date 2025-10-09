@@ -309,7 +309,7 @@ export const createChatSession = (userFullName: string, language: 'en' | 'es' | 
 };
 
 
-export const extractPaymentDetailsFromImage = async (base64Image: string): Promise<{ recipientName: string, amount: number, recipientAccountNumber: string }> => {
+export const extractPaymentDetailsFromImage = async (base64Image: string, mimeType: string): Promise<{ recipientName: string, amount: number, recipientAccountNumber: string }> => {
     const prompt = `Analyze the provided image, which could be a photo of a handwritten note or a document. Extract the following three pieces of information for a financial transaction:
 1. The recipient's full name (recipientName).
 2. The monetary amount (amount).
@@ -319,7 +319,7 @@ Return the information as a JSON object. If any piece of information is unclear 
 
     const imagePart = {
         inlineData: {
-            mimeType: 'image/jpeg',
+            mimeType: mimeType,
             data: base64Image,
         },
     };
@@ -458,12 +458,12 @@ For each language, the analysis must include:
 };
 
 
-export const extractPassportDetails = async (base64Image: string) => {
+export const extractPassportDetails = async (base64Image: string, mimeType: string) => {
     const prompt = `Analyze this image of a passport. Extract the following details: full name, passport number, date of birth, expiry date, and nationality. Return the information as a JSON object. If any field is not visible, return an empty string for it.`;
 
     const imagePart = {
         inlineData: {
-            mimeType: 'image/jpeg',
+            mimeType: mimeType,
             data: base64Image,
         },
     };
